@@ -1,0 +1,149 @@
+name: CI-CD
+on:
+  push:
+      branches:
+      - develop
+      - test
+      - main
+  pull_request_review:
+    types: submitted
+    branches:
+      - develop
+      - test
+      - main
+  pull_request:
+    types: [closed]
+    branches:
+      - develop
+      - test
+      - main
+
+jobs:
+  build_and_deploy_job:
+    if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved') }}
+    runs-on: ubuntu-latest
+    name: Build and Deploy Job
+    steps:
+      
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+          lfs: false
+      
+      - name: Genera Deploy ID
+        run: |
+          export TZ='America/Costa_Rica'          
+          CURRENT_DATE=$(date +%Y-%m-%d)
+          CURRENT_HOUR=$(date +%H:%M%P)
+          DEPLOY_ID="#${{ github.run_number }}.${{ github.run_attempt }} ${CURRENT_DATE} ${CURRENT_HOUR}"
+          echo "Deploy ID: $DEPLOY_ID"
+          echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
+      
+      - name: Genera Variables de Entorno para Develop
+        if: ${{ github.event.pull_request.base.ref == 'develop' || github.ref_name == 'develop' }}
+        run: |
+          ENVIRONMENT="develop"
+          IMPLEMENTATION_TOKEN=${{ secrets.IMPLEMENTATION_TOKEN_DEV }}
+          API_URL=${{ vars.REACT_APP_API_URL_DEV }}
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
+          echo "IMPLEMENTATION_TOKEN=$IMPLEMENTATION_TOKEN" >> $GITHUB_ENV
+          echo "API_URL=$API_URL" >> $GITHUB_ENV       
+
+      - name: Genera Variables de Entorno para Test
+        if: ${{ github.event.pull_request.base.ref == 'test' || github.ref_name == 'test' }}
+        run: |
+          ENVIRONMENT="test"
+          IMPLEMENTATION_TOKEN=${{ secrets.IMPLEMENTATION_TOKEN_TEST }}
+          API_URL=${{ vars.REACT_APP_API_URL_TEST }}
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
+          echo "IMPLEMENTATION_TOKEN=$IMPLEMENTATION_TOKEN" >> $GITHUB_ENV
+          echo "API_URL=$API_URL" >> $GITHUB_ENV
+
+      - name: Genera Variables de Entorno para Prod
+        if: ${{ github.event.pull_request.base.ref == 'main' || github.ref_name == 'main' }}
+        run: |
+          ENVIRONMENT="production"
+          IMPLEMENTATION_TOKEN=${{ secrets.IMPLEMENTATION_TOKEN_PROD }}
+          API_URL=${{ vars.REACT_APP_API_URL_PROD }}
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_ENV
+          echo "IMPLEMENTATION_TOKEN=$IMPLEMENTATION_TOKEN" >> $GITHUB_ENV
+          echo "API_URL=$API_URL" >> $GITHUB_ENV
+          
+      - name: Muestra Variables de Entorno
+        run: |
+          echo "******************"
+          echo "ENVIRONMENT Seteado: $ENVIRONMENT"
+          echo "IMPLEMENTATION_TOKEN Seteado: $IMPLEMENTATION_TOKEN"
+          echo "API_URL Seteado: $API_URL"
+          echo "DEPLOY_ID Seteado: $DEPLOY_ID"
+          echo "Rama Destino: ${{ github.event.pull_request.base.ref }}"
+          echo "******************"
+      
+      - name: Valida Variables de Entorno
+        run: |
+          if [[ -z "$ENVIRONMENT" ]]; then
+            echo "Error: ENVIRONMENT no seteado"
+            exit 1
+          fi
+          if [[ -z "$IMPLEMENTATION_TOKEN" ]]; then
+            echo "Error: IMPLEMENTATION_TOKEN no seteado"
+            exit 1
+          fi
+          if [[ -z "$API_URL" ]]; then
+            echo "Error: API_URL no seteado"
+            exit 1
+          fi
+          if [[ -z "$DEPLOY_ID" ]]; then
+            echo "Error: DEPLOY_ID no seteado"
+            exit 1
+          fi
+      
+      - name: Build And Deploy To Azure Static Web App
+        id: builddeploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ env.IMPLEMENTATION_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "./Client"
+          api_location: ""
+          output_location: "wwwroot"
+          #deployment_environment: "develop or test or production"
+          
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: On Close Pull Request Job - Delete Pre-Deploy Site
+    steps:
+      
+      - name: Genera Variables de Entorno para Develop
+        if: ${{ github.event.pull_request.base.ref == 'develop' || github.ref_name == 'develop' }}
+        run: |
+          IMPLEMENTATION_TOKEN=${{ secrets.IMPLEMENTATION_TOKEN_DEV }}
+          echo "IMPLEMENTATION_TOKEN=$IMPLEMENTATION_TOKEN" >> $GITHUB_ENV
+
+      - name: Genera Variables de Entorno para Test
+        if: ${{ github.event.pull_request.base.ref == 'test' || github.ref_name == 'test' }}
+        run: |
+          IMPLEMENTATION_TOKEN=${{ secrets.IMPLEMENTATION_TOKEN_TEST }}
+          echo "IMPLEMENTATION_TOKEN=$IMPLEMENTATION_TOKEN" >> $GITHUB_ENV
+
+      - name: Genera Variables de Entorno para Prod
+        if: ${{ github.event.pull_request.base.ref == 'main' || github.ref_name == 'main' }}
+        run: |
+          IMPLEMENTATION_TOKEN=${{ secrets.IMPLEMENTATION_TOKEN_PROD }}
+          echo "IMPLEMENTATION_TOKEN=$IMPLEMENTATION_TOKEN" >> $GITHUB_ENV
+
+      - name: Valida Variables de Entorno
+        run: |
+          if [[ -z "$IMPLEMENTATION_TOKEN" ]]; then
+            echo "Error: IMPLEMENTATION_TOKEN no seteado"
+            exit 1
+          fi
+          
+      - name: Close Pull Request
+        id: closepullrequest
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ env.IMPLEMENTATION_TOKEN }}
+          action: "close"
